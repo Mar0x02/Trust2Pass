@@ -3,6 +3,11 @@
 import json
 import uuid
 from dataclasses import asdict, dataclass, field
+from datetime import datetime, timezone
+
+
+def now_str() -> str:
+    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
 
 
 @dataclass
@@ -13,6 +18,8 @@ class Entry:
     url: str = ""
     notes: str = ""
     id: str = field(default_factory=lambda: uuid.uuid4().hex)
+    created_at: str = field(default_factory=now_str)
+    updated_at: str = field(default_factory=now_str)
 
     @classmethod
     def from_dict(cls, data: dict) -> "Entry":
@@ -23,6 +30,9 @@ class Entry:
             password=data["password"],
             url=data.get("url", ""),
             notes=data.get("notes", ""),
+            # Vault lama (sebelum field ini ada) jatuh ke "sekarang" - lebih baik daripada crash.
+            created_at=data.get("created_at") or now_str(),
+            updated_at=data.get("updated_at") or now_str(),
         )
 
 
@@ -42,6 +52,7 @@ if __name__ == "__main__":
     b = Entry(site="github.com", username="trinity", password="zi0n")
 
     assert a.id != b.id  # id auto-generate harus unik
+    assert a.created_at and a.updated_at  # timestamp auto-stamp pas construct
 
     payload = dumps([a, b])
     restored = loads(payload)
@@ -53,5 +64,10 @@ if __name__ == "__main__":
     # Karakter unicode (mis. catatan berbahasa non-ASCII) harus utuh.
     c = Entry(site="unicode.test", username="u", password="p", notes="kunci spesial: éè中文")
     assert loads(dumps([c])) == [c]
+
+    # Vault lama tanpa created_at/updated_at (format sebelum field ini ada) -> gak crash.
+    old_format = {"id": "x", "site": "old.com", "username": "u", "password": "p"}
+    migrated = Entry.from_dict(old_format)
+    assert migrated.created_at and migrated.updated_at
 
     print("models.py self-check OK")
