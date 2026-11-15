@@ -4,8 +4,10 @@ import sys
 from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSettings, QTimer
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
 
+from ui import theme
 from ui.main_window import MainWindow
 from ui.tray import TrayIcon
 from ui.unlock_dialog import UnlockDialog
@@ -15,6 +17,7 @@ IDLE_LOCK_SECONDS = 10 * 60  # auto-lock setelah idle (CLAUDE.md: 5-15 menit, bi
 ORG_NAME = "Trust2Pass"
 APP_NAME = "Trust2Pass"
 SETTINGS_KEY_LAST_VAULT = "last_vault_path"
+ICON_PATH = Path(__file__).resolve().parent / "assets" / "icon-rounded.png"
 
 
 def choose_vault_path() -> Path | None:
@@ -114,6 +117,8 @@ def wire_app(window: MainWindow, tray: TrayIcon, vault_path: Path, app: QApplica
 def main() -> None:
     app = QApplication(sys.argv)
     app.setQuitOnLastWindowClosed(False)  # tetap hidup di tray walau dashboard ditutup
+    app.setWindowIcon(QIcon(str(ICON_PATH)))
+    theme.apply_theme(app)
 
     vault_path = choose_vault_path()
     if vault_path is None:
