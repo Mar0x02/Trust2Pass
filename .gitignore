@@ -1,0 +1,9 @@
+__pycache__/
+*.pyc
+.venv/
+*.vault
+.DS_Store
+
+# Instruksi internal, bukan dokumentasi publik
+CLAUDE.md
+update-graph.sh
