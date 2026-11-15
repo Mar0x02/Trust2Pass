@@ -1,18 +1,21 @@
-"""Window utama: daftar entri, CRUD, auto-lock."""
+"""Window utama: daftar entri (sidebar + panel detail), CRUD, auto-lock."""
+
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
-    QAbstractItemView,
     QApplication,
     QDialog,
     QFormLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QMessageBox,
     QPushButton,
-    QTableWidget,
-    QTableWidgetItem,
+    QSplitter,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -24,7 +27,7 @@ from vault.models import Entry
 
 CLIPBOARD_CLEAR_SECONDS = 20
 PASSWORD_MASK = "••••••••"
-COLUMNS = ("Situs", "Username", "Password", "URL")
+ICON_PATH = Path(__file__).resolve().parent.parent / "assets" / "icon-rounded.png"
 
 
 class EntryDialog(QDialog):
@@ -45,10 +48,12 @@ class EntryDialog(QDialog):
 
         self.password_input = QLineEdit(entry.password if entry else "")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.toggle_button = QPushButton("Show")
+        self.toggle_button = QPushButton("👁")
         self.toggle_button.setCheckable(True)
+        self.toggle_button.setFixedWidth(36)
         self.toggle_button.toggled.connect(self._toggle_password_visibility)
-        self.generate_button = QPushButton("Generate")
+        self.generate_button = QPushButton("🎲")
+        self.generate_button.setFixedWidth(36)
         self.generate_button.clicked.connect(self._on_generate)
 
         password_row = QHBoxLayout()
@@ -57,7 +62,7 @@ class EntryDialog(QDialog):
         password_row.addWidget(self.generate_button)
 
         form = QFormLayout()
-        form.addRow("Situs:", self.site_input)
+        form.addRow("Nama:", self.site_input)
         form.addRow("Username:", self.username_input)
         form.addRow("Password:", password_row)
         form.addRow("URL:", self.url_input)
@@ -66,17 +71,24 @@ class EntryDialog(QDialog):
         self.error_label = QLabel()
         self.error_label.setStyleSheet("color: #D9534F;")
 
+        cancel_button = QPushButton("Batal")
+        cancel_button.clicked.connect(self.reject)
         save_button = QPushButton("Simpan")
         save_button.clicked.connect(self._on_save)
+
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        button_row.addWidget(cancel_button)
+        button_row.addWidget(save_button)
 
         layout = QVBoxLayout(self)
         layout.addLayout(form)
         layout.addWidget(self.error_label)
-        layout.addWidget(save_button)
+        layout.addLayout(button_row)
 
     def _toggle_password_visibility(self, checked: bool) -> None:
         self.password_input.setEchoMode(QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password)
-        self.toggle_button.setText("Hide" if checked else "Show")
+        self.toggle_button.setText("🙈" if checked else "👁")
 
     def _on_generate(self) -> None:
         self.toggle_button.setChecked(True)
@@ -104,61 +116,190 @@ class EntryDialog(QDialog):
 
 
 class MainWindow(QWidget):
-    """Dashboard vault. Hanya dibuat setelah VaultManager unlocked (Confidentiality gate)."""
+    """Dashboard vault: sidebar daftar entri + panel detail. Hanya dibuat setelah
+    VaultManager unlocked (Confidentiality gate)."""
 
     locked = Signal()
 
     def __init__(self, manager: VaultManager, parent=None) -> None:
         super().__init__(parent)
         self.manager = manager
+        self._selected_id: str | None = None
+        self._password_visible = False
         self.setWindowTitle(f"Trust2Pass - {manager.path.name}")
 
-        self.table = QTableWidget(0, len(COLUMNS))
-        self.table.setHorizontalHeaderLabels(COLUMNS)
-        self.table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.table.doubleClicked.connect(self._on_edit)
+        # --- top bar ---
+        icon_label = QLabel()
+        pixmap = QPixmap(str(ICON_PATH))
+        if not pixmap.isNull():
+            icon_label.setPixmap(
+                pixmap.scaled(28, 28, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+            )
+        title_label = QLabel("Trust2Pass")
+        title_label.setStyleSheet("font-weight: bold; font-size: 15px;")
 
-        add_button = QPushButton("Tambah")
-        add_button.clicked.connect(self._on_add)
-        edit_button = QPushButton("Edit")
-        edit_button.clicked.connect(self._on_edit)
-        delete_button = QPushButton("Hapus")
-        delete_button.clicked.connect(self._on_delete)
-        copy_button = QPushButton("Copy Password")
-        copy_button.clicked.connect(self._on_copy_password)
-        lock_button = QPushButton("Lock")
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("🔍 Cari...")
+        self.search_input.textChanged.connect(self._refresh_list)
+
+        lock_button = QPushButton("🔒 Lock")
         lock_button.clicked.connect(self._on_lock)
 
-        toolbar = QHBoxLayout()
-        for button in (add_button, edit_button, delete_button, copy_button, lock_button):
-            toolbar.addWidget(button)
+        top_bar = QHBoxLayout()
+        top_bar.addWidget(icon_label)
+        top_bar.addWidget(title_label)
+        top_bar.addWidget(self.search_input, stretch=1)
+        top_bar.addWidget(lock_button)
+
+        # --- sidebar (daftar entri) ---
+        self.entry_list = QListWidget()
+        self.entry_list.currentItemChanged.connect(self._on_selection_changed)
+
+        add_button = QPushButton("+ Tambah Entri")
+        add_button.clicked.connect(self._on_add)
+
+        sidebar = QWidget()
+        sidebar_layout = QVBoxLayout(sidebar)
+        sidebar_layout.setContentsMargins(0, 0, 0, 0)
+        sidebar_layout.addWidget(self.entry_list)
+        sidebar_layout.addWidget(add_button)
+
+        # --- panel detail ---
+        detail_header = QLabel("DETAIL ENTRI")
+        detail_header.setStyleSheet("font-weight: bold; color: #6B7280;")
+        self.edit_button = QPushButton("✏️")
+        self.edit_button.setFixedWidth(36)
+        self.edit_button.clicked.connect(self._on_edit)
+        self.delete_button = QPushButton("🗑️")
+        self.delete_button.setFixedWidth(36)
+        self.delete_button.clicked.connect(self._on_delete)
+
+        detail_header_row = QHBoxLayout()
+        detail_header_row.addWidget(detail_header)
+        detail_header_row.addStretch()
+        detail_header_row.addWidget(self.edit_button)
+        detail_header_row.addWidget(self.delete_button)
+
+        self.detail_site = QLabel("-")
+        self.detail_username = QLabel("-")
+        self.detail_password = QLabel(PASSWORD_MASK)
+        self.detail_url = QLabel("-")
+        self.detail_url.setOpenExternalLinks(True)
+        self.detail_notes = QLabel("-")
+        self.detail_notes.setWordWrap(True)
+        self.detail_created = QLabel("-")
+        self.detail_updated = QLabel("-")
+
+        self.show_password_button = QPushButton("👁")
+        self.show_password_button.setFixedWidth(36)
+        self.show_password_button.setCheckable(True)
+        self.show_password_button.toggled.connect(self._toggle_detail_password)
+        copy_password_button = QPushButton("📋")
+        copy_password_button.setFixedWidth(36)
+        copy_password_button.clicked.connect(self._on_copy_password)
+
+        password_row = QHBoxLayout()
+        password_row.addWidget(self.detail_password, stretch=1)
+        password_row.addWidget(self.show_password_button)
+        password_row.addWidget(copy_password_button)
+
+        detail_form = QFormLayout()
+        detail_form.addRow("Nama:", self.detail_site)
+        detail_form.addRow("Username:", self.detail_username)
+        detail_form.addRow("Password:", password_row)
+        detail_form.addRow("URL:", self.detail_url)
+        detail_form.addRow("Catatan:", self.detail_notes)
+        detail_form.addRow("Dibuat:", self.detail_created)
+        detail_form.addRow("Diubah:", self.detail_updated)
+
+        detail_panel = QWidget()
+        detail_layout = QVBoxLayout(detail_panel)
+        detail_layout.addLayout(detail_header_row)
+        detail_layout.addLayout(detail_form)
+        detail_layout.addStretch()
+
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(sidebar)
+        splitter.addWidget(detail_panel)
+        splitter.setSizes([220, 480])
 
         layout = QVBoxLayout(self)
-        layout.addLayout(toolbar)
-        layout.addWidget(self.table)
+        layout.addLayout(top_bar)
+        layout.addWidget(splitter)
 
         self.refresh()
 
+    def _visible_entries(self) -> list[Entry]:
+        query = self.search_input.text().strip().lower()
+        if not query:
+            return list(self.manager.entries)
+        return [e for e in self.manager.entries if query in e.site.lower() or query in e.username.lower()]
+
     def refresh(self) -> None:
-        self.table.setRowCount(len(self.manager.entries))
-        for row, entry in enumerate(self.manager.entries):
-            self.table.setItem(row, 0, QTableWidgetItem(entry.site))
-            self.table.setItem(row, 1, QTableWidgetItem(entry.username))
-            self.table.setItem(row, 2, QTableWidgetItem(PASSWORD_MASK))
-            self.table.setItem(row, 3, QTableWidgetItem(entry.url))
+        self._refresh_list()
+
+    def _refresh_list(self) -> None:
+        self.entry_list.blockSignals(True)
+        self.entry_list.clear()
+        for entry in self._visible_entries():
+            item = QListWidgetItem(f"🌐 {entry.site}")
+            item.setData(Qt.ItemDataRole.UserRole, entry.id)
+            self.entry_list.addItem(item)
+            if entry.id == self._selected_id:
+                self.entry_list.setCurrentItem(item)
+        self.entry_list.blockSignals(False)
+        if self.entry_list.currentItem() is None:
+            self._selected_id = None
+        self._update_detail_panel()
 
     def _selected_entry(self) -> Entry | None:
-        row = self.table.currentRow()
-        if row < 0 or row >= len(self.manager.entries):
-            return None
-        return self.manager.entries[row]
+        for entry in self.manager.entries:
+            if entry.id == self._selected_id:
+                return entry
+        return None
+
+    def _on_selection_changed(self, current: QListWidgetItem | None, _previous) -> None:
+        self._selected_id = current.data(Qt.ItemDataRole.UserRole) if current else None
+        self._password_visible = False
+        self.show_password_button.setChecked(False)
+        self._update_detail_panel()
+
+    def _update_detail_panel(self) -> None:
+        entry = self._selected_entry()
+        has_entry = entry is not None
+        self.edit_button.setEnabled(has_entry)
+        self.delete_button.setEnabled(has_entry)
+        self.show_password_button.setEnabled(has_entry)
+
+        if entry is None:
+            self.detail_site.setText("-")
+            self.detail_username.setText("-")
+            self.detail_password.setText(PASSWORD_MASK)
+            self.detail_url.setText("-")
+            self.detail_notes.setText("-")
+            self.detail_created.setText("-")
+            self.detail_updated.setText("-")
+            return
+
+        self.detail_site.setText(entry.site)
+        self.detail_username.setText(entry.username)
+        self.detail_password.setText(entry.password if self._password_visible else PASSWORD_MASK)
+        self.detail_url.setText(entry.url or "-")
+        self.detail_notes.setText(entry.notes or "-")
+        self.detail_created.setText(entry.created_at)
+        self.detail_updated.setText(entry.updated_at)
+
+    def _toggle_detail_password(self, checked: bool) -> None:
+        self._password_visible = checked
+        self.show_password_button.setText("🙈" if checked else "👁")
+        self._update_detail_panel()
 
     def _on_add(self) -> None:
         dialog = EntryDialog(parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.manager.add_entry(dialog.result_entry)
-            self.refresh()
+            self._selected_id = dialog.result_entry.id
+            self._refresh_list()
 
     def _on_edit(self) -> None:
         entry = self._selected_entry()
@@ -171,7 +312,7 @@ class MainWindow(QWidget):
                 entry.id, site=updated.site, username=updated.username,
                 password=updated.password, url=updated.url, notes=updated.notes,
             )
-            self.refresh()
+            self._refresh_list()
 
     def _on_delete(self) -> None:
         entry = self._selected_entry()
@@ -180,7 +321,8 @@ class MainWindow(QWidget):
         confirm = QMessageBox.question(self, "Hapus Entri", f"Hapus entri '{entry.site}'?")
         if confirm == QMessageBox.StandardButton.Yes:
             self.manager.delete_entry(entry.id)
-            self.refresh()
+            self._selected_id = None
+            self._refresh_list()
 
     def _on_copy_password(self) -> None:
         entry = self._selected_entry()
@@ -201,6 +343,8 @@ class MainWindow(QWidget):
 
     def _on_lock(self) -> None:
         self.manager.lock()
+        self._selected_id = None
+        self._password_visible = False
         self.refresh()
         self.locked.emit()
 
@@ -221,12 +365,41 @@ if __name__ == "__main__":
         manager.add_entry(Entry(site="example.com", username="neo", password="hunter2"))
 
         window = MainWindow(manager)
-        assert window.table.rowCount() == 2
-        assert window.table.item(0, 0).text() == "github.com"
-        assert window.table.item(0, 2).text() == PASSWORD_MASK  # password harus ter-mask di tabel
+        assert window.entry_list.count() == 2
+        assert window.entry_list.item(0).text() == "🌐 github.com"
 
-        # Copy password -> clipboard keisi, lalu "timeout" logic harus clear kalau belum diubah.
-        window.table.setCurrentCell(0, 0)
+        # Belum ada seleksi -> panel detail kosong, edit/delete/show disabled.
+        assert window.detail_site.text() == "-"
+        assert not window.edit_button.isEnabled()
+
+        # Pilih entri pertama -> panel detail keisi, password tetap ter-mask.
+        window.entry_list.setCurrentRow(0)
+        assert window._selected_entry().site == "github.com"
+        assert window.detail_site.text() == "github.com"
+        assert window.detail_password.text() == PASSWORD_MASK
+        assert window.edit_button.isEnabled()
+
+        # Toggle show password di detail panel.
+        window.show_password_button.setChecked(True)
+        assert window.detail_password.text() == "s3cr3t!"
+        window.show_password_button.setChecked(False)
+        assert window.detail_password.text() == PASSWORD_MASK
+
+        # Ganti seleksi -> show-password harus reset ke hidden (jangan bocor ke entri lain).
+        window.show_password_button.setChecked(True)
+        window.entry_list.setCurrentRow(1)
+        assert not window.show_password_button.isChecked()
+        assert window.detail_password.text() == PASSWORD_MASK
+
+        # Search filter: cuma cocok 1 entri.
+        window.search_input.setText("github")
+        assert window.entry_list.count() == 1
+        assert window.entry_list.item(0).text() == "🌐 github.com"
+        window.search_input.setText("")
+        assert window.entry_list.count() == 2
+
+        # Copy password (dari detail panel) -> clipboard keisi, auto-clear logic jalan.
+        window.entry_list.setCurrentRow(0)
         window._on_copy_password()
         assert QApplication.clipboard().text() == "s3cr3t!"
         window._clear_clipboard_if_unchanged("s3cr3t!")
@@ -254,18 +427,19 @@ if __name__ == "__main__":
         assert dialog.result_entry is not None
         assert dialog.result_entry.site == "test.com"
 
-        # Edit lewat manager langsung (tanpa modal) lalu refresh harus kebawa ke tabel.
+        # Edit lewat manager langsung (tanpa modal) lalu refresh harus kebawa ke sidebar.
         target_id = manager.entries[1].id
         manager.update_entry(target_id, site="updated.com")
         window.refresh()
-        assert window.table.item(1, 0).text() == "updated.com"
+        assert any(e.site == "updated.com" for e in manager.entries)
 
-        # Lock -> manager locked, signal "locked" harus ke-emit.
+        # Lock -> manager locked, signal "locked" harus ke-emit, panel/list ke-clear.
         got_signal = []
         window.locked.connect(lambda: got_signal.append(True))
         window._on_lock()
         assert not manager.is_unlocked
         assert got_signal == [True]
-        assert window.table.rowCount() == 0  # entries udah di-clear manager.lock()
+        assert window.entry_list.count() == 0
+        assert window.detail_site.text() == "-"
 
     print("main_window.py self-check OK")
