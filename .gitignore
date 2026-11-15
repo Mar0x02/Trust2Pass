@@ -7,3 +7,6 @@ __pycache__/
 # Instruksi internal, bukan dokumentasi publik
 CLAUDE.md
 update-graph.sh
+
+# Knowledge graph graphify (hasil generate, bukan sumber kebenaran)
+graphify-out/
