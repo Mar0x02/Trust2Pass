@@ -4,7 +4,9 @@
 
 # Trust2Pass
 
-**Credential manager lokal-first** — proyek belajar cybersecurity dengan fokus penerapan **CIA Triad** (Confidentiality, Integrity, Availability) dalam desain kriptografi nyata.
+**Credential manager lokal-first berbasis Argon2id + AES-256-GCM** – vault terenkripsi, password generator, dan auto-lock, semuanya dari satu aplikasi desktop.
+
+[![GitHub](https://img.shields.io/badge/Mar0x02-Trust2Pass-181717?style=flat&logo=github&logoColor=white)](https://github.com/Mar0x02/Trust2Pass)
 
 ![status](https://img.shields.io/badge/status-skeleton%20%2F%20MVP-orange)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
@@ -73,11 +75,3 @@ python main.py
 
 ## Lisensi
 Proyek belajar pribadi — belum ada lisensi resmi.
-
----
-
-<div align="center">
-
-Dibuat oleh **[Mar0x02](https://github.com/Mar0x02)**
-
-</div>
