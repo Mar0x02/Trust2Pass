@@ -79,6 +79,7 @@ class VaultManager:
         self._save()
 
     def update_entry(self, entry_id: str, **changes) -> None:
+        changes.setdefault("updated_at", models.now_str())
         for i, e in enumerate(self.entries):
             if e.id == entry_id:
                 self.entries[i] = replace(e, **changes)
@@ -115,8 +116,11 @@ if __name__ == "__main__":
         assert len(vm.entries) == 2
 
         target_id = vm.entries[0].id
+        original_created_at = vm.entries[0].created_at
         vm.update_entry(target_id, password="new-password")
         assert vm.entries[0].password == "new-password"
+        assert vm.entries[0].created_at == original_created_at  # created_at tidak berubah saat edit
+        assert vm.entries[0].updated_at  # updated_at di-refresh otomatis
 
         vm.delete_entry(vm.entries[1].id)
         assert len(vm.entries) == 1
