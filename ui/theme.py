@@ -18,7 +18,7 @@ DARK = {
     "disabled_bg": "#232B36",
     "disabled_text": "#6B7280",
     "alt_row": "#11151C",
-    "glow": "#1C2742",
+    "glow": "#2B3F6E",
 }
 
 LIGHT = {
@@ -107,12 +107,15 @@ def build_stylesheet(tokens: dict) -> str:
     return STYLESHEET_TEMPLATE.format(**tokens)
 
 
-def tinted_icon(symbol: str, color: str, size: int = 28) -> QIcon:
+def tinted_icon(symbol: str, color: str, size: int = 28, boost: float = 1.0) -> QIcon:
     """Render glyph/emoji `symbol` jadi ikon monokrom warna `color` (ngikutin tema), bukan emoji warna asli.
 
     Emoji warna (mis. 👁 🎲 📋) membedakan detail pakai warna, bukan transparansi - kalau cuma
     dipotong pakai alpha-nya, detail itu hilang jadi blob. Jadi bagian gelap glyph dipakai sebagai
     "tinta" (makin gelap = makin solid), bagian terang jadi makin transparan, ala line-icon.
+
+    `boost` (>1.0) ngangkat opacity tiap piksel biar makin solid/putih - buat glyph yang warna
+    aslinya medium-terang (mis. 🌐) dan jadinya keabu-abuan kalau boost=1.0 (default, gak diubah).
     """
     scale = 2
     px = size * scale
@@ -137,6 +140,7 @@ def tinted_icon(symbol: str, color: str, size: int = 28) -> QIcon:
                 continue
             luminance = image.pixelColor(x, y).lightnessF() * 255
             ink_alpha = min(src_alpha, 255 - int(luminance))
+            ink_alpha = min(255, int(ink_alpha * boost))
             if ink_alpha > 0:
                 out.setPixelColor(x, y, QColor(base.red(), base.green(), base.blue(), ink_alpha))
 
