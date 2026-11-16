@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QApplication,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
 )
 
 from generator import generate_password
+from ui.theme import DARK, LIGHT, glow_background_css, is_dark_mode, tinted_icon
 from vault.manager import VaultManager
 from vault.models import Entry
 
@@ -37,9 +38,13 @@ class EntryDialog(QDialog):
         super().__init__(parent)
         self._entry_id = entry.id if entry else None
         self.result_entry: Entry | None = None
+        tokens = DARK if is_dark_mode() else LIGHT
+        self._button_icon_color = tokens["selection_text"]
 
         self.setWindowTitle("Edit Entri" if entry else "Tambah Entri")
         self.setModal(True)
+        self.setObjectName("entryDialog")
+        self.setStyleSheet(glow_background_css(tokens, "QDialog#entryDialog"))
 
         self.site_input = QLineEdit(entry.site if entry else "")
         self.username_input = QLineEdit(entry.username if entry else "")
@@ -48,11 +53,15 @@ class EntryDialog(QDialog):
 
         self.password_input = QLineEdit(entry.password if entry else "")
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-        self.toggle_button = QPushButton("👁")
+        self.toggle_button = QPushButton()
+        self.toggle_button.setIcon(tinted_icon("👁", self._button_icon_color))
+        self.toggle_button.setIconSize(QSize(18, 18))
         self.toggle_button.setCheckable(True)
         self.toggle_button.setFixedWidth(36)
         self.toggle_button.toggled.connect(self._toggle_password_visibility)
-        self.generate_button = QPushButton("🎲")
+        self.generate_button = QPushButton()
+        self.generate_button.setIcon(tinted_icon("🎲", self._button_icon_color))
+        self.generate_button.setIconSize(QSize(18, 18))
         self.generate_button.setFixedWidth(36)
         self.generate_button.clicked.connect(self._on_generate)
 
@@ -88,7 +97,7 @@ class EntryDialog(QDialog):
 
     def _toggle_password_visibility(self, checked: bool) -> None:
         self.password_input.setEchoMode(QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password)
-        self.toggle_button.setText("🙈" if checked else "👁")
+        self.toggle_button.setIcon(tinted_icon("🙈" if checked else "👁", self._button_icon_color))
 
     def _on_generate(self) -> None:
         self.toggle_button.setChecked(True)
@@ -127,6 +136,13 @@ class MainWindow(QWidget):
         self._selected_id: str | None = None
         self._password_visible = False
         self.setWindowTitle(f"Trust2Pass - {manager.path.name}")
+        self.setObjectName("mainWindow")
+
+        tokens = DARK if is_dark_mode() else LIGHT
+        self.setStyleSheet(glow_background_css(tokens, "QWidget#mainWindow"))
+        self._button_icon_color = tokens["selection_text"]  # semua QPushButton pakai background accent
+        self._page_icon_color = tokens["text"]  # ikon di atas background halaman (bukan tombol)
+        self._muted_icon_color = tokens["muted_text"]
 
         # --- top bar ---
         icon_label = QLabel()
@@ -139,10 +155,15 @@ class MainWindow(QWidget):
         title_label.setStyleSheet("font-weight: bold; font-size: 15px;")
 
         self.search_input = QLineEdit()
-        self.search_input.setPlaceholderText("🔍 Cari...")
+        self.search_input.setPlaceholderText("Cari...")
+        self.search_input.addAction(
+            tinted_icon("🔍", self._muted_icon_color), QLineEdit.ActionPosition.LeadingPosition
+        )
         self.search_input.textChanged.connect(self._refresh_list)
 
-        lock_button = QPushButton("🔒 Lock")
+        lock_button = QPushButton(" Lock")
+        lock_button.setIcon(tinted_icon("🔒", self._button_icon_color))
+        lock_button.setIconSize(QSize(16, 16))
         lock_button.clicked.connect(self._on_lock)
 
         top_bar = QHBoxLayout()
@@ -167,10 +188,14 @@ class MainWindow(QWidget):
         # --- panel detail ---
         detail_header = QLabel("DETAIL ENTRI")
         detail_header.setStyleSheet("font-weight: bold; color: #6B7280;")
-        self.edit_button = QPushButton("✏️")
+        self.edit_button = QPushButton()
+        self.edit_button.setIcon(tinted_icon("✏️", self._button_icon_color))
+        self.edit_button.setIconSize(QSize(18, 18))
         self.edit_button.setFixedWidth(36)
         self.edit_button.clicked.connect(self._on_edit)
-        self.delete_button = QPushButton("🗑️")
+        self.delete_button = QPushButton()
+        self.delete_button.setIcon(tinted_icon("🗑️", self._button_icon_color))
+        self.delete_button.setIconSize(QSize(18, 18))
         self.delete_button.setFixedWidth(36)
         self.delete_button.clicked.connect(self._on_delete)
 
@@ -190,11 +215,15 @@ class MainWindow(QWidget):
         self.detail_created = QLabel("-")
         self.detail_updated = QLabel("-")
 
-        self.show_password_button = QPushButton("👁")
+        self.show_password_button = QPushButton()
+        self.show_password_button.setIcon(tinted_icon("👁", self._button_icon_color))
+        self.show_password_button.setIconSize(QSize(18, 18))
         self.show_password_button.setFixedWidth(36)
         self.show_password_button.setCheckable(True)
         self.show_password_button.toggled.connect(self._toggle_detail_password)
-        copy_password_button = QPushButton("📋")
+        copy_password_button = QPushButton()
+        copy_password_button.setIcon(tinted_icon("📋", self._button_icon_color))
+        copy_password_button.setIconSize(QSize(18, 18))
         copy_password_button.setFixedWidth(36)
         copy_password_button.clicked.connect(self._on_copy_password)
 
@@ -242,7 +271,7 @@ class MainWindow(QWidget):
         self.entry_list.blockSignals(True)
         self.entry_list.clear()
         for entry in self._visible_entries():
-            item = QListWidgetItem(f"🌐 {entry.site}")
+            item = QListWidgetItem(tinted_icon("🌐", self._page_icon_color), entry.site)
             item.setData(Qt.ItemDataRole.UserRole, entry.id)
             self.entry_list.addItem(item)
             if entry.id == self._selected_id:
@@ -291,7 +320,7 @@ class MainWindow(QWidget):
 
     def _toggle_detail_password(self, checked: bool) -> None:
         self._password_visible = checked
-        self.show_password_button.setText("🙈" if checked else "👁")
+        self.show_password_button.setIcon(tinted_icon("🙈" if checked else "👁", self._button_icon_color))
         self._update_detail_panel()
 
     def _on_add(self) -> None:
@@ -366,7 +395,8 @@ if __name__ == "__main__":
 
         window = MainWindow(manager)
         assert window.entry_list.count() == 2
-        assert window.entry_list.item(0).text() == "🌐 github.com"
+        assert window.entry_list.item(0).text() == "github.com"
+        assert not window.entry_list.item(0).icon().isNull()
 
         # Belum ada seleksi -> panel detail kosong, edit/delete/show disabled.
         assert window.detail_site.text() == "-"
@@ -394,7 +424,7 @@ if __name__ == "__main__":
         # Search filter: cuma cocok 1 entri.
         window.search_input.setText("github")
         assert window.entry_list.count() == 1
-        assert window.entry_list.item(0).text() == "🌐 github.com"
+        assert window.entry_list.item(0).text() == "github.com"
         window.search_input.setText("")
         assert window.entry_list.count() == 2
 
