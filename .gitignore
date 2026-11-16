@@ -2,6 +2,7 @@ __pycache__/
 *.pyc
 .venv/
 *.vault
+*.t2p
 .DS_Store
 
 # Instruksi internal, bukan dokumentasi publik
