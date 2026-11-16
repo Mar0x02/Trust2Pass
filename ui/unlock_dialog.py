@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from cryptography.exceptions import InvalidTag
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QDialog,
@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
+from ui.theme import DARK, LIGHT, is_dark_mode, tinted_icon
 from vault.manager import VaultManager
 
 MIN_PASSWORD_LEN = 8
@@ -31,6 +32,9 @@ class UnlockDialog(QDialog):
         self.vault_path = Path(vault_path)
         self.manager = VaultManager()
         self._is_new = not self.vault_path.exists()
+        # Semua QPushButton di app ini punya background accent (lihat theme.py), jadi
+        # ikon tombol disamakan warnanya dengan label tombol (selection_text), bukan teks halaman.
+        self._button_icon_color = (DARK if is_dark_mode() else LIGHT)["selection_text"]
 
         self.setWindowTitle("Buat Vault Baru" if self._is_new else "Buka Vault")
         self.setModal(True)
@@ -58,7 +62,9 @@ class UnlockDialog(QDialog):
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.returnPressed.connect(self._on_submit)
 
-        self.password_toggle = QPushButton("👁")
+        self.password_toggle = QPushButton()
+        self.password_toggle.setIcon(tinted_icon("👁", self._button_icon_color))
+        self.password_toggle.setIconSize(QSize(18, 18))
         self.password_toggle.setCheckable(True)
         self.password_toggle.setFixedWidth(36)
         self.password_toggle.toggled.connect(self._toggle_password_visibility)
@@ -105,7 +111,7 @@ class UnlockDialog(QDialog):
 
     def _toggle_password_visibility(self, checked: bool) -> None:
         self.password_input.setEchoMode(QLineEdit.EchoMode.Normal if checked else QLineEdit.EchoMode.Password)
-        self.password_toggle.setText("🙈" if checked else "👁")
+        self.password_toggle.setIcon(tinted_icon("🙈" if checked else "👁", self._button_icon_color))
 
     def _on_submit(self) -> None:
         password_str = self.password_input.text()
@@ -175,7 +181,7 @@ if __name__ == "__main__":
         # Toggle show/hide password.
         dlg.password_toggle.setChecked(True)
         assert dlg.password_input.echoMode() == QLineEdit.EchoMode.Normal
-        assert dlg.password_toggle.text() == "🙈"
+        assert not dlg.password_toggle.icon().isNull()
         dlg.password_toggle.setChecked(False)
         assert dlg.password_input.echoMode() == QLineEdit.EchoMode.Password
 
