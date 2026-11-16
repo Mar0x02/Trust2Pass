@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import QSize, Qt, QTimer, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
     QDialog,
@@ -11,7 +11,6 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QLineEdit,
-    QListWidget,
     QListWidgetItem,
     QMessageBox,
     QPushButton,
@@ -22,6 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from generator import generate_password
+from ui.glass import GlassListWidget, GlassPanel
 from ui.theme import DARK, LIGHT, glow_background_css, is_dark_mode, tinted_icon
 from vault.manager import VaultManager
 from vault.models import Entry
@@ -139,10 +139,21 @@ class MainWindow(QWidget):
         self.setObjectName("mainWindow")
 
         tokens = DARK if is_dark_mode() else LIGHT
-        self.setStyleSheet(glow_background_css(tokens, "QWidget#mainWindow"))
+        # QSplitter & handle-nya kena rule global "QWidget { background-color }" juga (dari
+        # app.setStyleSheet di theme.apply_theme), jadi perlu ditimpa eksplisit jadi transparent -
+        # kalau enggak, celah antara dua kartu kaca keisi warna bg solid, bukan nerusin glow di baliknya.
+        self.setStyleSheet(
+            glow_background_css(tokens, "QWidget#mainWindow") + "QSplitter, QSplitter::handle { background: transparent; }"
+        )
         self._button_icon_color = tokens["selection_text"]  # semua QPushButton pakai background accent
         self._page_icon_color = tokens["text"]  # ikon di atas background halaman (bukan tombol)
         self._muted_icon_color = tokens["muted_text"]
+
+        # Frosted glass klasik: kartu kaca HARUS lebih terang dari background di belakangnya biar
+        # kebaca sebagai "kaca" (bukan makin gelap kayak nimpa warna surface gelap di atas bg gelap -
+        # kontrasnya ilang). Makanya tint-nya putih, bukan warna token surface/border.
+        glass_tint = QColor(255, 255, 255, 34)
+        glass_border = QColor(255, 255, 255, 75)
 
         # --- top bar ---
         icon_label = QLabel()
@@ -173,17 +184,25 @@ class MainWindow(QWidget):
         top_bar.addWidget(lock_button)
 
         # --- sidebar (daftar entri) ---
-        self.entry_list = QListWidget()
+        # List diisi full-height (bukan dipotong layout) - tombol tambah NEMPEL ngambang langsung
+        # di atasnya (tanpa panel/backdrop di belakangnya - cuma tombolnya doang yang melayang),
+        # supaya item yang di-scroll tetap kebaca sampai ke batas bawah list.
+        self.entry_list = GlassListWidget(
+            tokens["glow"], tokens["bg"], glass_tint, glass_border, radius=14, blur_radius=30
+        )
+        self.entry_list.setObjectName("entryList")
         self.entry_list.currentItemChanged.connect(self._on_selection_changed)
 
-        add_button = QPushButton("+ Tambah Entri")
+        add_button = QPushButton(" Tambah Entri")
+        add_button.setIcon(tinted_icon("➕", self._button_icon_color))
+        add_button.setIconSize(QSize(14, 14))
         add_button.clicked.connect(self._on_add)
+        self.entry_list.attach_floating(add_button, margin=10)
 
         sidebar = QWidget()
         sidebar_layout = QVBoxLayout(sidebar)
         sidebar_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_layout.addWidget(self.entry_list)
-        sidebar_layout.addWidget(add_button)
 
         # --- panel detail ---
         detail_header = QLabel("DETAIL ENTRI")
@@ -241,18 +260,22 @@ class MainWindow(QWidget):
         detail_form.addRow("Dibuat:", self.detail_created)
         detail_form.addRow("Diubah:", self.detail_updated)
 
-        detail_panel = QWidget()
+        detail_panel = GlassPanel(tokens["glow"], tokens["bg"], glass_tint, glass_border, radius=14, blur_radius=30)
         detail_layout = QVBoxLayout(detail_panel)
+        detail_layout.setContentsMargins(16, 16, 16, 16)
         detail_layout.addLayout(detail_header_row)
         detail_layout.addLayout(detail_form)
         detail_layout.addStretch()
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.setHandleWidth(16)
         splitter.addWidget(sidebar)
         splitter.addWidget(detail_panel)
         splitter.setSizes([220, 480])
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 12, 16, 16)
+        layout.setSpacing(12)
         layout.addLayout(top_bar)
         layout.addWidget(splitter)
 
@@ -271,11 +294,19 @@ class MainWindow(QWidget):
         self.entry_list.blockSignals(True)
         self.entry_list.clear()
         for entry in self._visible_entries():
-            item = QListWidgetItem(tinted_icon("🌐", self._page_icon_color), entry.site)
+            item = QListWidgetItem(tinted_icon("🌐", self._page_icon_color, boost=2.4), entry.site)
             item.setData(Qt.ItemDataRole.UserRole, entry.id)
             self.entry_list.addItem(item)
             if entry.id == self._selected_id:
                 self.entry_list.setCurrentItem(item)
+        # Baris kosong non-selectable di akhir, setinggi dock tombol tambah - tanpa ini, scroll
+        # mentok begitu item terakhir baru nyentuh tepi atas dock, padahal dock masih nutupin
+        # separuh baris itu (susah diklik). Dengan baris kosong ini, item terakhir bisa discroll
+        # sampai bener-bener lewat dari belakang dock.
+        spacer = QListWidgetItem()
+        spacer.setFlags(Qt.ItemFlag.NoItemFlags)
+        spacer.setSizeHint(QSize(1, self.entry_list.bottom_reserved_height()))
+        self.entry_list.addItem(spacer)
         self.entry_list.blockSignals(False)
         if self.entry_list.currentItem() is None:
             self._selected_id = None
@@ -394,7 +425,7 @@ if __name__ == "__main__":
         manager.add_entry(Entry(site="example.com", username="neo", password="hunter2"))
 
         window = MainWindow(manager)
-        assert window.entry_list.count() == 2
+        assert window.entry_list.count() == 3  # 2 entri + 1 baris spacer non-selectable di akhir
         assert window.entry_list.item(0).text() == "github.com"
         assert not window.entry_list.item(0).icon().isNull()
 
@@ -423,10 +454,10 @@ if __name__ == "__main__":
 
         # Search filter: cuma cocok 1 entri.
         window.search_input.setText("github")
-        assert window.entry_list.count() == 1
+        assert window.entry_list.count() == 2  # 1 entri cocok + 1 spacer
         assert window.entry_list.item(0).text() == "github.com"
         window.search_input.setText("")
-        assert window.entry_list.count() == 2
+        assert window.entry_list.count() == 3
 
         # Copy password (dari detail panel) -> clipboard keisi, auto-clear logic jalan.
         window.entry_list.setCurrentRow(0)
@@ -469,7 +500,7 @@ if __name__ == "__main__":
         window._on_lock()
         assert not manager.is_unlocked
         assert got_signal == [True]
-        assert window.entry_list.count() == 0
+        assert window.entry_list.count() == 1  # 0 entri + 1 spacer
         assert window.detail_site.text() == "-"
 
     print("main_window.py self-check OK")
