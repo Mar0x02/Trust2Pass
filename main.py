@@ -5,12 +5,13 @@ from pathlib import Path
 
 from PySide6.QtCore import QEvent, QObject, QSettings, QTimer
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QDialog, QFileDialog
+from PySide6.QtWidgets import QApplication, QDialog
 
 from ui import theme
 from ui.main_window import MainWindow
 from ui.tray import TrayIcon
 from ui.unlock_dialog import UnlockDialog
+from ui.vault_picker_dialog import VaultPickerDialog
 from vault.manager import VaultManager
 
 IDLE_LOCK_SECONDS = 10 * 60  # auto-lock setelah idle (CLAUDE.md: 5-15 menit, bisa diatur)
@@ -21,17 +22,15 @@ ICON_PATH = Path(__file__).resolve().parent / "assets" / "icon-rounded.png"
 
 
 def choose_vault_path() -> Path | None:
-    """Vault terakhir (kalau masih ada) -> dialog buka vault -> dialog buat vault baru."""
+    """Vault terakhir (kalau masih ada) -> dialog branded pilih/buat vault."""
     last_path = QSettings(ORG_NAME, APP_NAME).value(SETTINGS_KEY_LAST_VAULT, "")
     if last_path and Path(last_path).exists():
         return Path(last_path)
 
-    existing, _ = QFileDialog.getOpenFileName(None, "Buka Vault Trust2Pass", "", "Trust2Pass Vault (*.t2p)")
-    if existing:
-        return Path(existing)
-
-    new_path, _ = QFileDialog.getSaveFileName(None, "Buat Vault Baru", "trust2pass.t2p", "Trust2Pass Vault (*.t2p)")
-    return Path(new_path) if new_path else None
+    picker = VaultPickerDialog()
+    if picker.exec() == QDialog.DialogCode.Accepted:
+        return picker.vault_path
+    return None
 
 
 def remember_vault_path(path: Path) -> None:
