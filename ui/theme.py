@@ -1,7 +1,7 @@
 """Tema aplikasi: palette Midnight Obsidian, ngikutin dark/light mode sistem."""
 
 from PySide6.QtCore import Qt
-from PySide6.QtGui import QGuiApplication
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPixmap
 
 DARK = {
     "bg": "#0C0F14",
@@ -18,6 +18,7 @@ DARK = {
     "disabled_bg": "#232B36",
     "disabled_text": "#6B7280",
     "alt_row": "#11151C",
+    "glow": "#1C2742",
 }
 
 LIGHT = {
@@ -35,6 +36,7 @@ LIGHT = {
     "disabled_bg": "#E3E8F0",
     "disabled_text": "#9AA3B2",
     "alt_row": "#F2F5F9",
+    "glow": "#E7EEFF",
 }
 
 STYLESHEET_TEMPLATE = """
@@ -103,6 +105,58 @@ QLabel {{
 
 def build_stylesheet(tokens: dict) -> str:
     return STYLESHEET_TEMPLATE.format(**tokens)
+
+
+def tinted_icon(symbol: str, color: str, size: int = 28) -> QIcon:
+    """Render glyph/emoji `symbol` jadi ikon monokrom warna `color` (ngikutin tema), bukan emoji warna asli.
+
+    Emoji warna (mis. 👁 🎲 📋) membedakan detail pakai warna, bukan transparansi - kalau cuma
+    dipotong pakai alpha-nya, detail itu hilang jadi blob. Jadi bagian gelap glyph dipakai sebagai
+    "tinta" (makin gelap = makin solid), bagian terang jadi makin transparan, ala line-icon.
+    """
+    scale = 2
+    px = size * scale
+    glyph = QPixmap(px, px)
+    glyph.fill(Qt.GlobalColor.transparent)
+
+    painter = QPainter(glyph)
+    font = painter.font()
+    font.setPixelSize(int(px * 0.82))
+    painter.setFont(font)
+    painter.drawText(glyph.rect(), Qt.AlignmentFlag.AlignCenter, symbol)
+    painter.end()
+
+    image = glyph.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    out = QImage(image.size(), QImage.Format.Format_ARGB32_Premultiplied)
+    out.fill(Qt.GlobalColor.transparent)
+    base = QColor(color)
+    for y in range(image.height()):
+        for x in range(image.width()):
+            src_alpha = image.pixelColor(x, y).alpha()
+            if src_alpha == 0:
+                continue
+            luminance = image.pixelColor(x, y).lightnessF() * 255
+            ink_alpha = min(src_alpha, 255 - int(luminance))
+            if ink_alpha > 0:
+                out.setPixelColor(x, y, QColor(base.red(), base.green(), base.blue(), ink_alpha))
+
+    result = QPixmap.fromImage(out).scaled(
+        size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
+    )
+    return QIcon(result)
+
+
+def glow_background_css(tokens: dict, selector: str) -> str:
+    """CSS radial-glow (sama kayak VaultPickerDialog) buat dipasang di window/dialog lain lewat `selector`.
+
+    `selector` harus spesifik ke 1 widget pakai object name, mis. "QDialog#entryDialog", supaya
+    gak ketimpa/nimpa background widget lain yang kebetulan sama-sama QWidget/QDialog.
+    """
+    return (
+        f"{selector} {{ background: qradialgradient("
+        "cx:0.5, cy:0.22, radius:1.1, fx:0.5, fy:0.22, "
+        f"stop:0 {tokens['glow']}, stop:1 {tokens['bg']}); }}"
+    )
 
 
 def is_dark_mode() -> bool:
