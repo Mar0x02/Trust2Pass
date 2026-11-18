@@ -22,10 +22,18 @@ class VaultManager:
         self._memory_kib = storage.DEFAULT_MEMORY_KIB
         self._time_cost = storage.DEFAULT_TIME_COST
         self._parallelism = storage.DEFAULT_PARALLELISM
+        self._kind = storage.KIND_VAULT
 
     @property
     def is_unlocked(self) -> bool:
         return self._key is not None
+
+    @property
+    def kind(self) -> int:
+        """`storage.KIND_VAULT` (biasa) atau `storage.KIND_EXPORT` (hasil fitur Export) - dibaca
+        dari header file, bukan dari password, jadi gak butuh unlock dulu buat tau (lihat
+        `storage.read_header` yang dipanggil fitur Import SEBELUM minta password)."""
+        return self._kind
 
     def create(
         self,
@@ -34,11 +42,13 @@ class VaultManager:
         memory_kib: int = storage.DEFAULT_MEMORY_KIB,
         time_cost: int = storage.DEFAULT_TIME_COST,
         parallelism: int = storage.DEFAULT_PARALLELISM,
+        kind: int = storage.KIND_VAULT,
     ) -> None:
         """Buat vault baru kosong di `path` (overwrite kalau sudah ada)."""
         self.path = Path(path)
         self._salt = kdf.generate_salt()
         self._memory_kib, self._time_cost, self._parallelism = memory_kib, time_cost, parallelism
+        self._kind = kind
         self._key = bytearray(kdf.derive_key(password, self._salt, memory_kib, time_cost, parallelism))
         self.entries = []
         self._save()
@@ -55,6 +65,7 @@ class VaultManager:
         self._memory_kib = header["memory_kib"]
         self._time_cost = header["time_cost"]
         self._parallelism = header["parallelism"]
+        self._kind = header["kind"]
         self._key = bytearray(key)
         self.entries = models.loads(plaintext)
 
@@ -71,11 +82,17 @@ class VaultManager:
             raise RuntimeError("vault belum unlocked/dibuat")
         storage.write_vault(
             self.path, self._key, models.dumps(self.entries), self._salt,
-            self._memory_kib, self._time_cost, self._parallelism,
+            self._memory_kib, self._time_cost, self._parallelism, self._kind,
         )
 
     def add_entry(self, entry: models.Entry) -> None:
         self.entries.append(entry)
+        self._save()
+
+    def add_entries(self, entries: list[models.Entry]) -> None:
+        """Dipakai Import/Export (main_window.py) - satu kali tulis ke disk buat banyak entri
+        sekaligus, bukan _save() berkali-kali kayak manggil add_entry() di loop."""
+        self.entries.extend(entries)
         self._save()
 
     def update_entry(self, entry_id: str, **changes) -> None:
@@ -110,6 +127,18 @@ if __name__ == "__main__":
         vm.create(vault_path, password, MIN_MEMORY_KIB, MIN_TIME_COST, MIN_PARALLELISM)
         assert vm.is_unlocked
         assert vm.entries == []
+        assert vm.kind == storage.KIND_VAULT  # default
+
+        # kind=KIND_EXPORT (fitur Export) - ke-persist & kebaca balik dari disk.
+        export_path = Path(tmp) / "export_test.t2p"
+        vm_export = VaultManager()
+        vm_export.create(export_path, b"password export beda", MIN_MEMORY_KIB, MIN_TIME_COST, MIN_PARALLELISM, kind=storage.KIND_EXPORT)
+        assert vm_export.kind == storage.KIND_EXPORT
+        vm_export.lock()
+        vm_export2 = VaultManager()
+        vm_export2.unlock(export_path, b"password export beda")
+        assert vm_export2.kind == storage.KIND_EXPORT
+        vm_export2.lock()
 
         vm.add_entry(models.Entry(site="github.com", username="Mar0x02", password="s3cr3t!"))
         vm.add_entry(models.Entry(site="example.com", username="neo", password="hunter2"))
@@ -135,6 +164,17 @@ if __name__ == "__main__":
         assert len(vm2.entries) == 1
         assert vm2.entries[0].id == target_id
         assert vm2.entries[0].password == "new-password"
+
+        # add_entries (dipake Import/Export) - satu kali save buat banyak entri.
+        vm2.add_entries([
+            models.Entry(site="a.com", username="a", password="pa"),
+            models.Entry(site="b.com", username="b", password="pb"),
+        ])
+        assert len(vm2.entries) == 3
+        vm4 = VaultManager()
+        vm4.unlock(vault_path, password)
+        assert len(vm4.entries) == 3  # ke-persist ke disk
+        vm4.lock()
 
         # Password salah -> reject.
         vm3 = VaultManager()
