@@ -230,18 +230,25 @@ class MainWindow(QWidget):
         self._page_icon_color = tokens["text"]  # ikon di atas background halaman (bukan tombol)
         self._muted_icon_color = tokens["muted_text"]
 
-        # Frosted glass klasik: kartu kaca HARUS lebih terang dari background di belakangnya biar
-        # kebaca sebagai "kaca" (bukan makin gelap kayak nimpa warna surface gelap di atas bg gelap -
-        # kontrasnya ilang). Makanya tint-nya putih, bukan warna token surface/border.
-        glass_tint = QColor(255, 255, 255, 34)
-        glass_border = QColor(255, 255, 255, 75)
+        # Frosted glass klasik: kartu kaca harus KONTRAS sama background di belakangnya biar
+        # kebaca sebagai "kaca", bukan nyatu/ilang. Arahnya kebalik tergantung tema: di dark mode
+        # kartu harus lebih TERANG dari bg gelap (tint putih), di light mode kartu harus lebih
+        # GELAP dikit dari bg yang udah putih/nyaris-putih (tint hitam tipis) - kalau tetep pakai
+        # tint putih di light mode, kartunya nyaris invisible (putih di atas putih).
+        if is_dark_mode():
+            glass_tint = QColor(255, 255, 255, 34)
+            glass_border = QColor(255, 255, 255, 75)
+        else:
+            glass_tint = QColor(0, 0, 0, 14)
+            glass_border = QColor(0, 0, 0, 70)
 
         # Sidebar nempel di tepi kiri window - di luar jangkauan radial-glow yang nyala di
         # tengah-atas (lihat glow_background_css), jadi kalau tint-nya putih polos kayak
         # detail_panel, dia numpuk di atas bg yang udah gelap di situ dan keliatan mati/item,
         # bukan kaca. Dikasih dasar warna dari token glow sendiri biar tetep keliatan "kaca biru"
-        # independen dari backdrop window di belakangnya.
-        sidebar_tint = QColor(tokens["glow"]).lighter(200)
+        # independen dari backdrop window di belakangnya. lighter()/darker() arahnya juga ngikutin
+        # tema - sama alasannya kayak glass_tint di atas.
+        sidebar_tint = QColor(tokens["glow"]).lighter(200) if is_dark_mode() else QColor(tokens["glow"]).darker(115)
         sidebar_tint.setAlpha(160)
 
         # --- top bar ---
