@@ -2,6 +2,9 @@
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QImage, QPainter, QPixmap
+from PySide6.QtWidgets import QLabel, QLineEdit
+
+FIELD_ERROR_COLOR = "#D9534F"
 
 DARK = {
     "bg": "#0C0F14",
@@ -15,10 +18,11 @@ DARK = {
     "cyan": "#65D0EA",
     "cyan_text": "#0C0F14",
     "selection_text": "#F2F5F9",
-    "disabled_bg": "#232B36",
-    "disabled_text": "#6B7280",
     "alt_row": "#11151C",
     "glow": "#2B3F6E",
+    "danger": "#D9534F",
+    "danger_hover": "#E6655F",
+    "danger_pressed": "#C14641",
 }
 
 LIGHT = {
@@ -33,17 +37,19 @@ LIGHT = {
     "cyan": "#1C8FB0",
     "cyan_text": "#FFFFFF",
     "selection_text": "#FFFFFF",
-    "disabled_bg": "#E3E8F0",
-    "disabled_text": "#9AA3B2",
     "alt_row": "#F2F5F9",
     "glow": "#E7EEFF",
+    "danger": "#D9534F",
+    "danger_hover": "#C9423D",
+    "danger_pressed": "#B53934",
 }
 
 STYLESHEET_TEMPLATE = """
 QWidget {{
     background-color: {bg};
     color: {text};
-    font-size: 13px;
+    font-family: "Helvetica Neue", "SF Pro Text", "Segoe UI", "Noto Sans", sans-serif;
+    font-size: 15px;
 }}
 QDialog {{
     background-color: {bg};
@@ -74,12 +80,43 @@ QPushButton:pressed {{
     background-color: {accent_pressed};
 }}
 QPushButton:disabled {{
-    background-color: {disabled_bg};
-    color: {disabled_text};
+    background-color: {accent};
+    color: {selection_text};
 }}
 QPushButton:checkable:checked {{
     background-color: {cyan};
     color: {cyan_text};
+}}
+/* Secondary: aksi netral (Batal, toggle/utility icon kayak edit/copy/eye) - gak boleh bersaing
+   visual sama tombol primary (biru solid) di layar yang sama. */
+QPushButton[variant="secondary"] {{
+    background-color: {surface};
+    color: {text};
+    border: 1px solid {border};
+}}
+QPushButton[variant="secondary"]:hover {{
+    background-color: {border};
+}}
+QPushButton[variant="secondary"]:disabled {{
+    background-color: {surface};
+    color: {text};
+}}
+/* Danger: aksi destruktif (Hapus) - sengaja beda warna dari primary biar ada sinyal bahaya
+   sebelum user ngilangin data. */
+QPushButton[variant="danger"] {{
+    background-color: {danger};
+    color: #FFFFFF;
+    border: none;
+}}
+QPushButton[variant="danger"]:hover {{
+    background-color: {danger_hover};
+}}
+QPushButton[variant="danger"]:pressed {{
+    background-color: {danger_pressed};
+}}
+QPushButton[variant="danger"]:disabled {{
+    background-color: {danger};
+    color: #FFFFFF;
 }}
 QTableWidget {{
     background-color: {bg};
@@ -147,7 +184,34 @@ def tinted_icon(symbol: str, color: str, size: int = 28, boost: float = 1.0) -> 
     result = QPixmap.fromImage(out).scaled(
         size, size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation
     )
-    return QIcon(result)
+    icon = QIcon()
+    icon.addPixmap(result, QIcon.Mode.Normal)
+    # Tanpa ini, Qt otomatis bikin versi "Disabled" pudar/abu-abu dari pixmap Normal - padahal
+    # tombol yang disabled di app ini (edit/delete/show-password) sengaja tetep digambar biru+putih
+    # kayak tombol aktif (lihat QPushButton:disabled di STYLESHEET_TEMPLATE).
+    icon.addPixmap(result, QIcon.Mode.Disabled)
+    return icon
+
+
+def make_hint_label() -> QLabel:
+    """Label italic kecil buat pesan error SATU FIELD - dipasang persis di bawah input-nya
+    (lihat `mark_field_error`/`clear_field_error`), bukan satu pesan error gabungan di bawah form
+    yang gak jelas nunjuk ke field mana."""
+    hint = QLabel()
+    hint.setStyleSheet(f"color: {FIELD_ERROR_COLOR}; font-style: italic; font-size: 11px;")
+    hint.setVisible(False)
+    return hint
+
+
+def mark_field_error(field: QLineEdit, hint: QLabel, message: str) -> None:
+    field.setStyleSheet(f"border: 1px solid {FIELD_ERROR_COLOR};")
+    hint.setText(message)
+    hint.setVisible(True)
+
+
+def clear_field_error(field: QLineEdit, hint: QLabel) -> None:
+    field.setStyleSheet("")
+    hint.setVisible(False)
 
 
 def glow_background_css(tokens: dict, selector: str) -> str:
