@@ -6,6 +6,7 @@ from PySide6.QtCore import QSize, Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QDialog, QFileDialog, QLabel, QPushButton, QVBoxLayout
 
+from ui.i18n import tr
 from ui.theme import DARK, LIGHT, glow_background_css, is_dark_mode, tinted_icon
 
 ICON_PATH = Path(__file__).resolve().parent.parent / "assets" / "icon-rounded.png"
@@ -42,7 +43,7 @@ class VaultPickerDialog(QDialog):
         title_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         title_label.setStyleSheet("font-size: 20px; font-weight: bold;")
 
-        subtitle_label = QLabel("Pilih atau Buat Vault")
+        subtitle_label = QLabel(tr("vault_picker_subtitle"))
         subtitle_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         subtitle_label.setStyleSheet("color: #6B7280;")
 
@@ -50,17 +51,17 @@ class VaultPickerDialog(QDialog):
         # warnanya dengan label tombol (selection_text), bukan teks halaman.
         button_icon_color = tokens["selection_text"]
 
-        self.open_button = QPushButton(" Buka Vault yang Ada")
+        self.open_button = QPushButton(tr("btn_open_existing"))
         self.open_button.setIcon(tinted_icon("📂", button_icon_color))
         self.open_button.setIconSize(QSize(18, 18))
         self.open_button.clicked.connect(self._on_open_existing)
 
-        self.new_button = QPushButton(" Buat Vault Baru")
+        self.new_button = QPushButton(tr("btn_new_vault"))
         self.new_button.setIcon(tinted_icon("➕", button_icon_color))
         self.new_button.setIconSize(QSize(18, 18))
         self.new_button.clicked.connect(self._on_create_new)
 
-        self.status_label = QLabel("Status: Belum ada vault dipilih")
+        self.status_label = QLabel(tr("vault_picker_status_empty"))
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.status_label.setStyleSheet("color: #6B7280; font-size: 11px;")
 
@@ -77,14 +78,18 @@ class VaultPickerDialog(QDialog):
         layout.addWidget(self.status_label)
 
     def _on_open_existing(self) -> None:
-        path_str, _ = QFileDialog.getOpenFileName(self, "Buka Vault Trust2Pass", "", "Trust2Pass Vault (*.t2p)")
+        path_str, _ = QFileDialog.getOpenFileName(
+            self, tr("file_dialog_open_title"), "", "Trust2Pass Vault (*.t2p)"
+        )
         if not path_str:
             return
         self.vault_path = Path(path_str)
         self.accept()
 
     def _on_create_new(self) -> None:
-        path_str, _ = QFileDialog.getSaveFileName(self, "Buat Vault Baru", "trust2pass.t2p", "Trust2Pass Vault (*.t2p)")
+        path_str, _ = QFileDialog.getSaveFileName(
+            self, tr("file_dialog_save_title"), "trust2pass.t2p", "Trust2Pass Vault (*.t2p)"
+        )
         if not path_str:
             return
         self.vault_path = Path(path_str)
@@ -96,6 +101,9 @@ if __name__ == "__main__":
 
     from PySide6.QtWidgets import QApplication
 
+    from ui.i18n import set_language
+
+    set_language("id")  # deterministik - gak ikut locale mesin yang jalanin self-check
     app = QApplication(sys.argv)
 
     dlg = VaultPickerDialog()
