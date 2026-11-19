@@ -1,5 +1,6 @@
 """Entry point aplikasi Trust2Pass."""
 
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -180,14 +181,16 @@ def main() -> None:
 
     window.show()
     exit_code = app.exec()
-    # QSystemTrayIcon (NSStatusItem di macOS) yang dibiarkan ke-cleanup otomatis pas interpreter
-    # Python finalize (atexit) bisa segfault - urutan destroy Shiboken/Qt bentrok sama urutan GC
-    # Python di titik itu (lihat crash log ~/Library/Logs/DiagnosticReports/Python-*.ips:
-    # SIGSEGV di QSystemTrayIconWrapper::~QSystemTrayIconWrapper lewat Py_Finalize). Hapus
-    # eksplisit DI SINI (app masih hidup, urutannya predictable) biar gak nyampe ke titik itu.
-    tray.hide()
-    del tray
-    sys.exit(exit_code)
+    # PySide6/Shiboken ngerusak destructor widget Qt APAPUN (udah kejadian 2x: QSystemTrayIcon,
+    # lalu QLineEdit) kalau dibiarkan ke-cleanup otomatis pas Python interpreter finalize
+    # (_Py_Finalize/atexit) - urutan destroy Shiboken bentrok sama urutan GC Python di titik itu,
+    # segfault (lihat crash log ~/Library/Logs/DiagnosticReports/Python-*.ips). Nutup satu-satu
+    # widget secara manual gak scalable (bisa widget APAPUN yang kena giliran berikutnya).
+    # os._exit() skip TOTAL proses finalize Python (atexit, destructor, GC) dan exit langsung di
+    # level OS - aman di sini karena satu-satunya cleanup yang BENERAN penting (lock vault/
+    # zeroize Master Key) udah kejadian lewat app.aboutToQuit di atas, SEBELUM titik ini, bukan
+    # lewat atexit/destructor Python.
+    os._exit(exit_code)
 
 
 if __name__ == "__main__":
