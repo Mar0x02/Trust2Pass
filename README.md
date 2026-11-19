@@ -72,7 +72,7 @@ python main.py
 
 ## Roadmap
 1. **Fase 1 (MVP)** — vault lokal tunggal, zero-knowledge murni, fitur inti, multi-bahasa, Import/Export antar vault. *(sedang berjalan)*
-2. **Fase 2** — recovery key sederhana, audit log, password health checker.
+2. **Fase 2** — recovery key sederhana, audit log, password health checker, MFA sebagai faktor kedua di atas Master Password (perlu desain terpisah soal gimana faktor ini masuk ke derivasi Master Key), dan mitigasi in-use-memory: exclude window dari screen-capture API (Windows/macOS) + macOS Secure Input Mode saat field master password fokus — mitigasi terhadap malware userspace (screen-scraper, event-tap keylogger), bukan garansi penuh.
 3. **Fase 3** — multi-device sync terenkripsi end-to-end; auto-save & auto-fill credential via **browser extension** (native messaging ke app desktop, origin/domain-matching ketat). **Bukan** lewat OS Accessibility API/global hook: akses baca-tulis UI window app lain lewat Accessibility itu all-or-nothing di level OS (gak ada izin granular "cuma buat autofill"), jadi satu-satunya "pembatasan" ada di kode aplikasi sendiri — bukan dijamin OS — dan ilang begitu kodenya ke-compromise (bug, supply chain, dsb). Secara teknis pattern itu identik dengan keylogger/credential-stealing malware, jadi sengaja dikeluarkan dari scope.
 4. **Fase 4** — porting logika inti ke Rust/Tauri untuk keamanan memori yang lebih ketat.
 
