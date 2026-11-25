@@ -12,6 +12,9 @@ dist/
 logs/
 .briefcase/
 
+# Draft catatan rilis (buat ditempel manual ke GitHub Release, bukan dokumentasi repo)
+release/
+
 # Instruksi internal, bukan dokumentasi publik
 CLAUDE.md
 update-graph.sh
