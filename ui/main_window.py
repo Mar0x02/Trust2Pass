@@ -8,6 +8,7 @@ from PySide6.QtCore import QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QPixmap
 from PySide6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QDialog,
     QFileDialog,
     QFormLayout,
@@ -30,6 +31,7 @@ from ui.entry_picker_dialog import EntryPickerDialog
 from ui.import_report_dialog import ImportReportDialog
 from ui.glass import GlassListWidget, GlassPanel
 from ui.i18n import tr
+from ui.mfa_dialog import MfaPromptDialog, MfaSettingsDialog
 from ui.unlock_dialog import UnlockDialog
 from ui.theme import (
     DARK,
@@ -42,7 +44,7 @@ from ui.theme import (
     tinted_icon,
 )
 from vault import storage
-from vault.manager import VaultManager
+from vault.manager import InvalidMfaCode, MfaLockedOut, VaultManager
 from vault.models import Entry
 
 CLIPBOARD_CLEAR_SECONDS = 20
@@ -68,12 +70,17 @@ def _section_header(title: str, tokens: dict) -> QVBoxLayout:
 
 
 class EntryDialog(QDialog):
-    """Form tambah/edit satu entri. Sukses -> self.result_entry (Entry) siap dipakai caller."""
+    """Form tambah/edit satu entri. Sukses -> self.result_entry (Entry) siap dipakai caller.
 
-    def __init__(self, entry: Entry | None = None, parent=None) -> None:
+    `entry` di sini HARUS sudah plaintext (kalau sebelumnya ter-gate MFA, caller wajib reveal
+    dulu lewat VaultManager.reveal_password - lihat MainWindow._on_edit)."""
+
+    def __init__(self, entry: Entry | None = None, mfa_enabled: bool = False, mfa_scope: str = "all", parent=None) -> None:
         super().__init__(parent)
         self._entry_id = entry.id if entry else None
         self.result_entry: Entry | None = None
+        self._mfa_enabled = mfa_enabled
+        self._mfa_scope = mfa_scope
         tokens = DARK if is_dark_mode() else LIGHT
         self._button_icon_color = tokens["selection_text"]  # ikon di atas tombol primary (biru)
         self._secondary_icon_color = tokens["text"]  # ikon di atas tombol secondary (netral)
@@ -133,10 +140,23 @@ class EntryDialog(QDialog):
         password_field.addLayout(password_row)
         password_field.addWidget(self.password_hint)
 
+        # Checkbox ini cuma relevan kalau MFA lagi aktif - scope "all" bikin SEMUA entri ter-gate
+        # terlepas dari flag ini, jadi checkbox-nya dikasih info itu & dikunci (lihat vault/manager.py
+        # entry_should_be_gated). Scope "selected" -> checkbox ini beneran nentuin per-entri.
+        self.mfa_checkbox = QCheckBox(tr("entry_dialog_mfa_checkbox"))
+        self.mfa_checkbox.setChecked(bool(entry and entry.mfa_required))
+        self.mfa_checkbox.setVisible(self._mfa_enabled)
+        if self._mfa_enabled and self._mfa_scope == "all":
+            self.mfa_checkbox.setChecked(True)
+            self.mfa_checkbox.setEnabled(False)
+            self.mfa_checkbox.setToolTip(tr("entry_dialog_mfa_checkbox_all_hint"))
+
         form = QFormLayout()
         form.addRow(tr("form_label_nama"), site_field)
         form.addRow(tr("form_label_username"), username_field)
         form.addRow(tr("form_label_password"), password_field)
+        if self._mfa_enabled:
+            form.addRow("", self.mfa_checkbox)
         form.addRow(tr("form_label_url"), self.url_input)
         form.addRow(tr("form_label_catatan"), self.notes_input)
 
@@ -189,15 +209,18 @@ class EntryDialog(QDialog):
         if not valid:
             return
 
+        mfa_required = self.mfa_checkbox.isChecked() if self._mfa_enabled else False
         if self._entry_id:
             self.result_entry = Entry(
                 id=self._entry_id, site=site, username=username, password=password,
                 url=self.url_input.text().strip(), notes=self.notes_input.toPlainText(),
+                mfa_required=mfa_required,
             )
         else:
             self.result_entry = Entry(
                 site=site, username=username, password=password,
                 url=self.url_input.text().strip(), notes=self.notes_input.toPlainText(),
+                mfa_required=mfa_required,
             )
         self.accept()
 
@@ -213,6 +236,10 @@ class MainWindow(QWidget):
         self.manager = manager
         self._selected_id: str | None = None
         self._password_visible = False
+        # Plaintext hasil reveal_password() buat entri yang SAAT INI dipilih & ter-gate MFA -
+        # sesaat doang, di-reset ke None pas ganti seleksi/toggle off (lihat _on_selection_changed,
+        # _toggle_detail_password) biar gak nyasar ke entri lain atau nongkrong lama di memori.
+        self._revealed_password: str | None = None
         self.setWindowTitle(f"Trust2Pass - {manager.path.name}")
         self.setObjectName("mainWindow")
         # Tanpa ini, ukuran awal window ngikutin sizeHint layout yang kekecilan - sidebar jadi
@@ -288,6 +315,12 @@ class MainWindow(QWidget):
         export_button.setProperty("variant", "secondary")
         export_button.clicked.connect(self._on_export)
 
+        mfa_button = QPushButton(tr("btn_mfa"))
+        mfa_button.setIcon(tinted_icon("🔐", self._page_icon_color))
+        mfa_button.setIconSize(QSize(16, 16))
+        mfa_button.setProperty("variant", "secondary")
+        mfa_button.clicked.connect(self._on_mfa_settings)
+
         lock_button = QPushButton(tr("btn_lock"))
         lock_button.setIcon(tinted_icon("🔒", self._button_icon_color))
         lock_button.setIconSize(QSize(16, 16))
@@ -299,6 +332,7 @@ class MainWindow(QWidget):
         top_bar.addWidget(self.search_input, stretch=1)
         top_bar.addWidget(import_button)
         top_bar.addWidget(export_button)
+        top_bar.addWidget(mfa_button)
         top_bar.addWidget(lock_button)
 
         # --- sidebar (daftar entri) ---
@@ -478,7 +512,11 @@ class MainWindow(QWidget):
         first_item = None
         selected_item = None
         for entry in self._visible_entries():
-            item = QListWidgetItem(tinted_icon("🌐", self._page_icon_color, boost=2.4), entry.site)
+            # Lambang 🔐 cuma penanda cepat "password-nya ter-gate MFA sekarang" (password_sealed =
+            # state AKTUAL, bukan mfa_required = niat) - biar user gak nebak-nebak bakal diminta
+            # kode TOTP pas reveal/copy/edit entri ini.
+            label = f"{entry.site} 🔐" if entry.password_sealed else entry.site
+            item = QListWidgetItem(tinted_icon("🌐", self._page_icon_color, boost=2.4), label)
             item.setData(Qt.ItemDataRole.UserRole, entry.id)
             self.entry_list.addItem(item)
             first_item = first_item or item
@@ -509,6 +547,7 @@ class MainWindow(QWidget):
     def _on_selection_changed(self, current: QListWidgetItem | None, _previous) -> None:
         self._selected_id = current.data(Qt.ItemDataRole.UserRole) if current else None
         self._password_visible = False
+        self._revealed_password = None  # jangan nyasar ke entri lain
         self.show_password_button.setChecked(False)
         self._update_detail_panel()
 
@@ -534,7 +573,12 @@ class MainWindow(QWidget):
 
         self.detail_site.setText(entry.site)
         self.detail_username.setText(entry.username)
-        self.detail_password.setText(entry.password if self._password_visible else PASSWORD_MASK)
+        # Entri ter-gate: `entry.password` itu CIPHERTEXT (lihat vault/manager.py), jangan pernah
+        # ditampilin apa adanya - plaintext-nya cuma ada di `_revealed_password` (sesaat, hasil
+        # reveal_password() lewat prompt TOTP, lihat _toggle_detail_password).
+        plaintext = self._revealed_password if entry.password_sealed else entry.password
+        self.detail_password.setText(plaintext if (self._password_visible and plaintext) else PASSWORD_MASK)
+        self.show_password_button.setToolTip(tr("mfa_gated_tooltip") if entry.password_sealed else "")
         self.detail_url.setText(entry.url or "-")
         notes = entry.notes or "-"
         elided = self.detail_notes.fontMetrics().elidedText(
@@ -546,12 +590,39 @@ class MainWindow(QWidget):
         self.detail_updated.setText(format_timestamp(entry.updated_at))
 
     def _toggle_detail_password(self, checked: bool) -> None:
+        entry = self._selected_entry()
+        if checked and entry is not None and entry.password_sealed:
+            revealed = self._reveal_with_prompt(entry.id)
+            if revealed is None:
+                self.show_password_button.setChecked(False)  # batal -> balik off, gak lanjut nyalain
+                return
+            self._revealed_password = revealed
+        if not checked:
+            self._revealed_password = None
         self._password_visible = checked
         self.show_password_button.setIcon(tinted_icon("🙈" if checked else "👁", self._button_icon_color))
         self._update_detail_panel()
 
+    def _reveal_with_prompt(self, entry_id: str) -> str | None:
+        """Minta kode TOTP via dialog, retry kalau salah, None kalau user Batal/kena lockout."""
+        while True:
+            dialog = MfaPromptDialog(parent=self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return None
+            try:
+                return self.manager.reveal_password(entry_id, dialog.code)
+            except InvalidMfaCode:
+                self._show_info(tr("mfa_invalid_code_title"), tr("mfa_invalid_code_text"))
+            except MfaLockedOut as e:
+                self._show_info(tr("mfa_locked_title"), tr("mfa_locked_text", seconds=int(e.retry_after) + 1))
+                return None
+
+    def _on_mfa_settings(self) -> None:
+        MfaSettingsDialog(self.manager, parent=self).exec()
+        self._refresh_list()  # badge 🔐 di sidebar & checkbox entry dialog ikut setting baru
+
     def _on_add(self) -> None:
-        dialog = EntryDialog(parent=self)
+        dialog = EntryDialog(mfa_enabled=self.manager.mfa_enabled, mfa_scope=self.manager.mfa_scope, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self.manager.add_entry(dialog.result_entry)
             self._selected_id = dialog.result_entry.id
@@ -561,12 +632,18 @@ class MainWindow(QWidget):
         entry = self._selected_entry()
         if entry is None:
             return
-        dialog = EntryDialog(entry, parent=self)
+        if entry.password_sealed:
+            plaintext = self._reveal_with_prompt(entry.id)
+            if plaintext is None:
+                return
+            entry = replace(entry, password=plaintext)
+        dialog = EntryDialog(entry, mfa_enabled=self.manager.mfa_enabled, mfa_scope=self.manager.mfa_scope, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             updated = dialog.result_entry
             self.manager.update_entry(
                 entry.id, site=updated.site, username=updated.username,
                 password=updated.password, url=updated.url, notes=updated.notes,
+                mfa_required=updated.mfa_required,
             )
             self._refresh_list()
 
@@ -596,7 +673,15 @@ class MainWindow(QWidget):
         entry = self._selected_entry()
         if entry is None:
             return
-        self._copy_to_clipboard(entry.password)
+        if entry.password_sealed:
+            # Dipakai sekali lalu dibiarin keluar dari scope - gak ada langkah "re-lock" eksplisit
+            # yang perlu dilakukan, sama seperti reveal buat show password.
+            password = self._reveal_with_prompt(entry.id)
+            if password is None:
+                return
+        else:
+            password = entry.password
+        self._copy_to_clipboard(password)
 
     def _copy_to_clipboard(self, password: str) -> None:
         clipboard = QApplication.clipboard()
@@ -800,5 +885,76 @@ if __name__ == "__main__":
         assert window.entry_list.count() == 1  # 0 entri + 1 spacer
         assert window.detail_site.text() == "-"
         assert window.detail_empty_label.isVisibleTo(window) and not window.detail_content.isVisibleTo(window)
+
+    # --- MFA ---
+    # _reveal_with_prompt beneran buka QDialog modal (.exec()) - di-monkeypatch di sini biar
+    # self-check gak nge-block nunggu input user, sama pola `dialog._on_submit()` langsung dipanggil
+    # (tanpa exec()) yang udah dipakai self-check UnlockDialog/EntryDialog di atas.
+    import pyotp
+
+    from crypto.totp import generate_secret
+
+    with tempfile.TemporaryDirectory() as tmp:
+        vault_path = Path(tmp) / "mfa_ui_test.t2p"
+        manager = VaultManager()
+        manager.create(vault_path, b"correct horse battery staple", MIN_MEMORY_KIB, MIN_TIME_COST, MIN_PARALLELISM)
+        manager.add_entry(Entry(site="gated.com", username="g", password="gated-pw"))
+        secret = generate_secret()
+        manager.enable_mfa(secret, "all", pyotp.TOTP(secret).now())
+        entry_id = manager.entries[0].id
+        assert manager.entries[0].password_sealed
+
+        window = MainWindow(manager)
+        # Badge 🔐 nunjukin entri ini ter-gate.
+        assert window.entry_list.item(0).text() == "gated.com 🔐"
+
+        # EntryDialog buat entri gated: scope "all" -> checkbox dipaksa checked+disabled.
+        add_dialog = EntryDialog(mfa_enabled=manager.mfa_enabled, mfa_scope=manager.mfa_scope, parent=window)
+        assert add_dialog.mfa_checkbox.isVisibleTo(add_dialog) and add_dialog.mfa_checkbox.isChecked()
+        assert not add_dialog.mfa_checkbox.isEnabled()
+
+        # Copy password - reveal dibatalkan (None) -> clipboard TIDAK keisi.
+        QApplication.clipboard().clear()
+        window._reveal_with_prompt = lambda entry_id: None
+        window._on_copy_password()
+        assert QApplication.clipboard().text() == ""
+
+        # Copy password - reveal sukses -> clipboard keisi plaintext ASLI, bukan ciphertext.
+        window._reveal_with_prompt = lambda entry_id: "gated-pw"
+        window._on_copy_password()
+        assert QApplication.clipboard().text() == "gated-pw"
+        QApplication.clipboard().clear()
+
+        # Toggle show password - reveal sukses -> plaintext kebaca; toggle off -> cache plaintext
+        # ke-wipe & balik masked (gak nongkrong lama di memori widget).
+        window.show_password_button.setChecked(True)
+        assert window.detail_password.text() == "gated-pw"
+        window.show_password_button.setChecked(False)
+        assert window.detail_password.text() == PASSWORD_MASK
+        assert window._revealed_password is None
+
+        # Edit entri gated - _on_edit() beneran dipanggil (bukan logic-nya ditiru di test), tapi
+        # EntryDialog ditukar sementara dengan stub yang nyatet entry apa yang diterimanya & langsung
+        # "Batal" (exec() -> Rejected) biar gak nyoba buka modal beneran.
+        captured = {}
+
+        class _FakeEntryDialog:
+            def __init__(self, entry=None, mfa_enabled=False, mfa_scope="all", parent=None):
+                captured["password"] = entry.password if entry else None
+
+            def exec(self):
+                return QDialog.DialogCode.Rejected
+
+        original_entry_dialog = globals()["EntryDialog"]
+        globals()["EntryDialog"] = _FakeEntryDialog
+        try:
+            window._reveal_with_prompt = lambda eid: "gated-pw"
+            window.entry_list.setCurrentRow(0)
+            window._on_edit()
+        finally:
+            globals()["EntryDialog"] = original_entry_dialog
+        # entry yang diterima EntryDialog pas edit harus PLAINTEXT hasil reveal, bukan ciphertext
+        # mentah yang nongkrong di manager.entries.
+        assert captured["password"] == "gated-pw"
 
     print("main_window.py self-check OK")
