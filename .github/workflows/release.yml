@@ -1,0 +1,63 @@
+name: Release
+
+# Push tag versi (mis. v1.0.0) -> build Trust2Pass buat macOS/Windows/Linux lewat Briefcase,
+# attach hasilnya ke GitHub Release. macOS pakai ad-hoc signing (bukan Apple Developer cert
+# berbayar) - user lain yang download tetap kena peringatan Gatekeeper, perlu klik kanan -> Open.
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            platform: macOS
+            package-args: "--adhoc-sign"
+            artifact-glob: dist/*.dmg
+          - os: windows-latest
+            platform: windows
+            package-args: ""
+            artifact-glob: dist/*.msi
+          - os: ubuntu-latest
+            platform: linux
+            package-args: ""
+            artifact-glob: dist/*.AppImage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Briefcase
+        run: python -m pip install briefcase
+
+      - name: Build
+        run: briefcase build ${{ matrix.platform }}
+
+      - name: Package
+        run: briefcase package ${{ matrix.platform }} ${{ matrix.package-args }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: trust2pass-${{ matrix.platform }}
+          path: ${{ matrix.artifact-glob }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

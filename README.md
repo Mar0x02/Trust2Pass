@@ -70,6 +70,17 @@ pip install -r requirements.txt
 python main.py
 ```
 
+## Build & Release
+Paket standalone (`.app`/`.dmg` macOS, `.msi` Windows, `.AppImage` Linux) dibuat lewat [Briefcase](https://briefcase.beeware.org/):
+```bash
+pip install briefcase
+briefcase build macOS       # atau windows / linux
+briefcase package macOS --adhoc-sign   # hasil di dist/
+```
+Push tag versi (`git tag v1.0.0 && git push --tags`) otomatis build ketiga platform via GitHub Actions dan attach ke GitHub Release (lihat `.github/workflows/release.yml`).
+
+> ⚠️ Build macOS pakai **ad-hoc signing**, bukan Apple Developer certificate berbayar — user yang download bakal kena peringatan Gatekeeper "unidentified developer" pertama kali, perlu klik kanan → Open manual.
+
 ## Roadmap
 1. **Fase 1 (MVP)** — vault lokal tunggal, zero-knowledge murni, fitur inti, multi-bahasa, Import/Export antar vault. *(sedang berjalan)*
 2. **Fase 2** — recovery key sederhana, audit log, password health checker, MFA sebagai faktor kedua di atas Master Password (perlu desain terpisah soal gimana faktor ini masuk ke derivasi Master Key), dan mitigasi in-use-memory: exclude window dari screen-capture API (Windows/macOS) + macOS Secure Input Mode saat field master password fokus — mitigasi terhadap malware userspace (screen-scraper, event-tap keylogger), bukan garansi penuh.
@@ -86,4 +97,4 @@ python main.py
 | ⬜ | `#F2F5F9` | Teks / foreground terang |
 
 ## Lisensi
-Proyek belajar pribadi — belum ada lisensi resmi.
+MIT — lihat [LICENSE](LICENSE).

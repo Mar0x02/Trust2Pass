@@ -1,9 +1,16 @@
 __pycache__/
 *.pyc
 .venv/
+.venv-build/
 *.vault
 *.t2p
 .DS_Store
+
+# Briefcase build artifacts (regenerated dari pyproject.toml, bukan sumber kebenaran)
+build/
+dist/
+logs/
+.briefcase/
 
 # Instruksi internal, bukan dokumentasi publik
 CLAUDE.md

@@ -1,0 +1,54 @@
+[project]
+name = "trust2pass"
+version = "0.1.0"
+license = "MIT"
+license-files = ["LICENSE"]
+
+[tool.briefcase]
+project_name = "Trust2Pass"
+bundle = "io.github.mar0x02"
+version = "0.1.0"
+url = "https://github.com/Mar0x02/Trust2Pass"
+author = "M Anang R"
+
+[tool.briefcase.app.trust2pass]
+formal_name = "Trust2Pass"
+description = "Credential manager lokal-first berbasis Argon2id + AES-256-GCM"
+long_description = """
+Trust2Pass adalah credential manager untuk penggunaan pribadi: satu vault
+terenkripsi, tersimpan lokal, tanpa server pusat. Proyek belajar cybersecurity
+dengan fokus penerapan CIA Triad (Confidentiality, Integrity, Availability).
+"""
+sources = [
+    "trust2pass",
+    "main.py",
+    "generator.py",
+    "crypto",
+    "vault",
+    "ui",
+    "assets",
+]
+requires = [
+    "argon2-cffi",
+    "cryptography",
+    "PySide6-Essentials",  # bukan "PySide6" - meta-package itu ikut narik Addons
+    # (QtMultimedia/QtWebEngine/Qt3D/dll, ~290MB) yang gak dipakai kode ini sama sekali.
+]
+icon = "assets/icon"
+
+[tool.briefcase.app.trust2pass.macOS]
+requires = []
+universal_build = false
+
+[tool.briefcase.app.trust2pass.macOS.app]
+
+[tool.briefcase.app.trust2pass.linux]
+requires = []
+
+[tool.briefcase.app.trust2pass.linux.appimage]
+manylinux = "manylinux_2_28"
+
+[tool.briefcase.app.trust2pass.windows]
+requires = []
+
+[tool.briefcase.app.trust2pass.windows.app]
