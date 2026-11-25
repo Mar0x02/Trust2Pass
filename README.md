@@ -7,6 +7,7 @@
 **Credential manager lokal-first berbasis Argon2id + AES-256-GCM** – vault terenkripsi, password generator, dan auto-lock, semuanya dari satu aplikasi desktop.
 
 [![GitHub](https://img.shields.io/badge/Mar0x02-Trust2Pass-181717?style=flat&logo=github&logoColor=white)](https://github.com/Mar0x02/Trust2Pass)
+[![Release](https://img.shields.io/github/v/release/Mar0x02/Trust2Pass?include_prereleases&label=download)](https://github.com/Mar0x02/Trust2Pass/releases/latest)
 
 ![status](https://img.shields.io/badge/status-MVP-blue)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
@@ -71,6 +72,8 @@ python main.py
 ```
 
 ## Build & Release
+Build siap pakai ada di [**GitHub Releases**](https://github.com/Mar0x02/Trust2Pass/releases/latest) (saat ini: `v1.0.0`, pre-release, macOS only — Windows/Linux menyusul).
+
 Paket standalone (`.app`/`.dmg` macOS, `.msi` Windows, `.AppImage` Linux) dibuat lewat [Briefcase](https://briefcase.beeware.org/):
 ```bash
 pip install briefcase
